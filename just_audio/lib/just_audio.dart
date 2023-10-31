@@ -2273,6 +2273,33 @@ abstract class UriAudioSource extends IndexedAudioSource {
 ///
 /// If headers are set, just_audio will create a cleartext local HTTP proxy on
 /// your device to forward HTTP requests with headers included.
+class DynamicHeadersAudioSource extends UriAudioSource {
+  final Map<String, String>? Function()? headersGenerator;
+  DynamicHeadersAudioSource(Uri uri, this.headersGenerator,
+      {Map<String, String>? headers, dynamic tag, Duration? duration})
+      : super(uri, headers: headers, tag: tag, duration: duration);
+
+  @override
+  AudioSourceMessage _toMessage() => ProgressiveAudioSourceMessage(
+      id: _id,
+      uri: _effectiveUri.toString(),
+      headers: headersGenerator?.call(),
+      tag: tag);
+}
+
+/// An [AudioSource] representing a regular media file such as an MP3 or M4A
+/// file. The following URI schemes are supported:
+///
+/// * file: loads from a local file (provided you give your app permission to
+/// access that file).
+/// * asset: loads from a Flutter asset (not supported on Web).
+/// * http(s): loads from an HTTP(S) resource.
+///
+/// On platforms except for the web, the supplied [headers] will be passed with
+/// the HTTP(S) request.
+///
+/// If headers are set, just_audio will create a cleartext local HTTP proxy on
+/// your device to forward HTTP requests with headers included.
 class ProgressiveAudioSource extends UriAudioSource {
   ProgressiveAudioSource(Uri uri,
       {Map<String, String>? headers, dynamic tag, Duration? duration})
