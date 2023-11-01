@@ -662,7 +662,7 @@ class AudioPlayer {
   /// See [setAudioSource] for a detailed explanation of the options.
   Future<Duration?> setUrl(
     String url, {
-    Map<String, String>? headers,
+    Map<String, String> Function()? headers,
     Duration? initialPosition,
     bool preload = true,
   }) =>
@@ -1957,14 +1957,10 @@ class _ProxyHttpServer {
   /// called only after [start] has completed.
   Uri addUriAudioSource(UriAudioSource source) {
     final uri = source.uri;
-    final headers = <String, String>{};
-    if (source.headersGenerator != null) {
-      headers.addAll(source.headersGenerator!());
-    }
     final path = _requestKey(uri);
     _handlerMap[path] = _proxyHandlerForUri(
       uri,
-      headersGenerator: source.headersGenerator,
+      headers: source.headers,
       userAgent: source._player?._userAgent,
     );
     return uri.replace(
@@ -2095,7 +2091,7 @@ abstract class AudioSource {
   /// If headers are set, just_audio will create a cleartext local HTTP proxy on
   /// your device to forward HTTP requests with headers included.
   static UriAudioSource uri(Uri uri,
-      {Map<String, String>? headers, dynamic tag}) {
+      {Map<String, String> Function()? headers, dynamic tag}) {
     bool hasExtension(Uri uri, String extension) =>
         uri.path.toLowerCase().endsWith('.$extension') ||
         uri.fragment.toLowerCase().endsWith('.$extension');
@@ -2188,12 +2184,12 @@ abstract class IndexedAudioSource extends AudioSource {
 /// An abstract class representing audio sources that are loaded from a URI.
 abstract class UriAudioSource extends IndexedAudioSource {
   final Uri uri;
-  final Map<String, String> Function()? headersGenerator;
+  final Map<String, String> Function()? headers;
   Uri? _overrideUri;
 
   UriAudioSource(
     this.uri, {
-    this.headersGenerator,
+    this.headers,
     dynamic tag,
     Duration? duration,
   }) : super(tag: tag, duration: duration);
@@ -2210,7 +2206,7 @@ abstract class UriAudioSource extends IndexedAudioSource {
       _overrideUri = await _loadAsset(uri.pathSegments.join('/'));
     } else if (uri.scheme != 'file' &&
         !kIsWeb &&
-        (headersGenerator != null || player._userAgent != null)) {
+        (headers != null || player._userAgent != null)) {
       await player._proxy.ensureRunning();
       _overrideUri = player._proxy.addUriAudioSource(this);
     }
@@ -2280,21 +2276,16 @@ abstract class UriAudioSource extends IndexedAudioSource {
 class DynamicHeadersAudioSource extends UriAudioSource {
   DynamicHeadersAudioSource(
     Uri uri, {
-    Map<String, String> Function()? headersGenerator,
+    Map<String, String> Function()? headers,
     dynamic tag,
     Duration? duration,
-  }) : super(
-          uri,
-          headersGenerator: headersGenerator,
-          tag: tag,
-          duration: duration,
-        );
+  }) : super(uri, headers: headers, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => ProgressiveAudioSourceMessage(
       id: _id,
       uri: _effectiveUri.toString(),
-      headers: headersGenerator?.call(),
+      headers: headers?.call(),
       tag: tag);
 }
 
@@ -2313,15 +2304,16 @@ class DynamicHeadersAudioSource extends UriAudioSource {
 /// your device to forward HTTP requests with headers included.
 class ProgressiveAudioSource extends UriAudioSource {
   ProgressiveAudioSource(Uri uri,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri,
-            headersGenerator: () => headers!, tag: tag, duration: duration);
+      {Map<String, String> Function()? headers,
+      dynamic tag,
+      Duration? duration})
+      : super(uri, headers: headers, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => ProgressiveAudioSourceMessage(
       id: _id,
       uri: _effectiveUri.toString(),
-      headers: headersGenerator!(),
+      headers: headers?.call(),
       tag: tag);
 }
 
@@ -2341,15 +2333,16 @@ class ProgressiveAudioSource extends UriAudioSource {
 /// your device to forward HTTP requests with headers included.
 class DashAudioSource extends UriAudioSource {
   DashAudioSource(Uri uri,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri,
-            headersGenerator: () => headers!, tag: tag, duration: duration);
+      {Map<String, String> Function()? headers,
+      dynamic tag,
+      Duration? duration})
+      : super(uri, headers: headers, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => DashAudioSourceMessage(
       id: _id,
       uri: _effectiveUri.toString(),
-      headers: headersGenerator!(),
+      headers: headers?.call(),
       tag: tag);
 }
 
@@ -2368,15 +2361,16 @@ class DashAudioSource extends UriAudioSource {
 /// your device to forward HTTP requests with headers included.
 class HlsAudioSource extends UriAudioSource {
   HlsAudioSource(Uri uri,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri,
-            headersGenerator: () => headers!, tag: tag, duration: duration);
+      {Map<String, String> Function()? headers,
+      dynamic tag,
+      Duration? duration})
+      : super(uri, headers: headers, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => HlsAudioSourceMessage(
       id: _id,
       uri: _effectiveUri.toString(),
-      headers: headersGenerator!(),
+      headers: headers?.call(),
       tag: tag);
 }
 
@@ -3210,7 +3204,7 @@ _ProxyHandler _proxyHandlerForSource(StreamAudioSource source) {
 /// A proxy handler for serving audio from a URI with optional headers.
 _ProxyHandler _proxyHandlerForUri(
   Uri uri, {
-  Map<String, String> Function()? headersGenerator,
+  Map<String, String> Function()? headers,
   String? userAgent,
 }) {
   // Keep redirected [Uri] to speed-up requests
@@ -3221,7 +3215,7 @@ _ProxyHandler _proxyHandlerForUri(
     String? host;
     try {
       final requestHeaders = <String, String>{
-        if (headersGenerator != null) ...headersGenerator()
+        if (headers != null) ...headers()
       };
       request.headers
           .forEach((name, value) => requestHeaders[name] = value.join(', '));
@@ -3243,8 +3237,7 @@ _ProxyHandler _proxyHandlerForUri(
       request.response.statusCode = originResponse.statusCode;
 
       // Send response
-      if (headersGenerator != null &&
-              request.uri.path.toLowerCase().endsWith('.m3u8') ||
+      if (headers != null && request.uri.path.toLowerCase().endsWith('.m3u8') ||
           ['application/x-mpegURL', 'application/vnd.apple.mpegurl']
               .contains(request.headers.value(HttpHeaders.contentTypeHeader))) {
         // If this is an m3u8 file with headers, prepare the nested URIs.
@@ -3268,7 +3261,7 @@ _ProxyHandler _proxyHandlerForUri(
               final nestedUri =
                   uri.replace(path: '$basePath${rawNestedUri.path}');
               server.addUriAudioSource(
-                  AudioSource.uri(nestedUri, headers: requestHeaders));
+                  AudioSource.uri(nestedUri, headers: headers));
             }
           } catch (e) {
             // ignore malformed lines

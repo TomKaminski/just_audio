@@ -399,7 +399,7 @@ void runTests() {
     // This simulates an actual URL
     final uri = Uri.parse(
         'http://${InternetAddress.loopbackIPv4.address}:${server.port}/proxy/foo.mp3');
-    await player.setUrl('$uri', headers: {'custom-header': 'Hello'});
+    await player.setUrl('$uri', headers: () => {'custom-header': 'Hello'});
     // Obtain the proxy URL that the platform side should use to load the data.
     final proxyUri = Uri.parse(player.icyMetadata!.info!.url!);
     // Simulate the platform side requesting the data.
