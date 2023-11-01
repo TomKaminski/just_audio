@@ -1958,13 +1958,13 @@ class _ProxyHttpServer {
   Uri addUriAudioSource(UriAudioSource source) {
     final uri = source.uri;
     final headers = <String, String>{};
-    if (source.headers != null) {
-      headers.addAll(source.headers!.cast<String, String>());
+    if (source.headersGenerator != null) {
+      headers.addAll(source.headersGenerator!());
     }
     final path = _requestKey(uri);
     _handlerMap[path] = _proxyHandlerForUri(
       uri,
-      headers: headers,
+      headersGenerator: source.headersGenerator,
       userAgent: source._player?._userAgent,
     );
     return uri.replace(
@@ -2188,11 +2188,15 @@ abstract class IndexedAudioSource extends AudioSource {
 /// An abstract class representing audio sources that are loaded from a URI.
 abstract class UriAudioSource extends IndexedAudioSource {
   final Uri uri;
-  final Map<String, String>? headers;
+  final Map<String, String> Function()? headersGenerator;
   Uri? _overrideUri;
 
-  UriAudioSource(this.uri, {this.headers, dynamic tag, Duration? duration})
-      : super(tag: tag, duration: duration);
+  UriAudioSource(
+    this.uri, {
+    this.headersGenerator,
+    dynamic tag,
+    Duration? duration,
+  }) : super(tag: tag, duration: duration);
 
   /// If [uri] points to an asset, this gives us [_overrideUri] which is the URI
   /// of the copied asset on the filesystem, otherwise it gives us the original
@@ -2206,7 +2210,7 @@ abstract class UriAudioSource extends IndexedAudioSource {
       _overrideUri = await _loadAsset(uri.pathSegments.join('/'));
     } else if (uri.scheme != 'file' &&
         !kIsWeb &&
-        (headers != null || player._userAgent != null)) {
+        (headersGenerator != null || player._userAgent != null)) {
       await player._proxy.ensureRunning();
       _overrideUri = player._proxy.addUriAudioSource(this);
     }
@@ -2274,10 +2278,17 @@ abstract class UriAudioSource extends IndexedAudioSource {
 /// If headers are set, just_audio will create a cleartext local HTTP proxy on
 /// your device to forward HTTP requests with headers included.
 class DynamicHeadersAudioSource extends UriAudioSource {
-  final Map<String, String>? Function()? headersGenerator;
-  DynamicHeadersAudioSource(Uri uri, this.headersGenerator,
-      {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+  DynamicHeadersAudioSource(
+    Uri uri, {
+    Map<String, String> Function()? headersGenerator,
+    dynamic tag,
+    Duration? duration,
+  }) : super(
+          uri,
+          headersGenerator: headersGenerator,
+          tag: tag,
+          duration: duration,
+        );
 
   @override
   AudioSourceMessage _toMessage() => ProgressiveAudioSourceMessage(
@@ -2303,11 +2314,15 @@ class DynamicHeadersAudioSource extends UriAudioSource {
 class ProgressiveAudioSource extends UriAudioSource {
   ProgressiveAudioSource(Uri uri,
       {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+      : super(uri,
+            headersGenerator: () => headers!, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => ProgressiveAudioSourceMessage(
-      id: _id, uri: _effectiveUri.toString(), headers: headers, tag: tag);
+      id: _id,
+      uri: _effectiveUri.toString(),
+      headers: headersGenerator!(),
+      tag: tag);
 }
 
 /// An [AudioSource] representing a DASH stream. The following URI schemes are
@@ -2327,11 +2342,15 @@ class ProgressiveAudioSource extends UriAudioSource {
 class DashAudioSource extends UriAudioSource {
   DashAudioSource(Uri uri,
       {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+      : super(uri,
+            headersGenerator: () => headers!, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => DashAudioSourceMessage(
-      id: _id, uri: _effectiveUri.toString(), headers: headers, tag: tag);
+      id: _id,
+      uri: _effectiveUri.toString(),
+      headers: headersGenerator!(),
+      tag: tag);
 }
 
 /// An [AudioSource] representing an HLS stream. The following URI schemes are
@@ -2350,11 +2369,15 @@ class DashAudioSource extends UriAudioSource {
 class HlsAudioSource extends UriAudioSource {
   HlsAudioSource(Uri uri,
       {Map<String, String>? headers, dynamic tag, Duration? duration})
-      : super(uri, headers: headers, tag: tag, duration: duration);
+      : super(uri,
+            headersGenerator: () => headers!, tag: tag, duration: duration);
 
   @override
   AudioSourceMessage _toMessage() => HlsAudioSourceMessage(
-      id: _id, uri: _effectiveUri.toString(), headers: headers, tag: tag);
+      id: _id,
+      uri: _effectiveUri.toString(),
+      headers: headersGenerator!(),
+      tag: tag);
 }
 
 /// An [AudioSource] for a period of silence.
@@ -3187,7 +3210,7 @@ _ProxyHandler _proxyHandlerForSource(StreamAudioSource source) {
 /// A proxy handler for serving audio from a URI with optional headers.
 _ProxyHandler _proxyHandlerForUri(
   Uri uri, {
-  Map<String, String>? headers,
+  Map<String, String> Function()? headersGenerator,
   String? userAgent,
 }) {
   // Keep redirected [Uri] to speed-up requests
@@ -3197,7 +3220,9 @@ _ProxyHandler _proxyHandlerForUri(
     // Try to make normal request
     String? host;
     try {
-      final requestHeaders = <String, String>{if (headers != null) ...headers};
+      final requestHeaders = <String, String>{
+        if (headersGenerator != null) ...headersGenerator()
+      };
       request.headers
           .forEach((name, value) => requestHeaders[name] = value.join(', '));
       final originRequest =
@@ -3218,7 +3243,8 @@ _ProxyHandler _proxyHandlerForUri(
       request.response.statusCode = originResponse.statusCode;
 
       // Send response
-      if (headers != null && request.uri.path.toLowerCase().endsWith('.m3u8') ||
+      if (headersGenerator != null &&
+              request.uri.path.toLowerCase().endsWith('.m3u8') ||
           ['application/x-mpegURL', 'application/vnd.apple.mpegurl']
               .contains(request.headers.value(HttpHeaders.contentTypeHeader))) {
         // If this is an m3u8 file with headers, prepare the nested URIs.
@@ -3242,7 +3268,7 @@ _ProxyHandler _proxyHandlerForUri(
               final nestedUri =
                   uri.replace(path: '$basePath${rawNestedUri.path}');
               server.addUriAudioSource(
-                  AudioSource.uri(nestedUri, headers: headers));
+                  AudioSource.uri(nestedUri, headers: requestHeaders));
             }
           } catch (e) {
             // ignore malformed lines
