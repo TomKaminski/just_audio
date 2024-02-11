@@ -2297,14 +2297,23 @@ abstract class UriAudioSource extends IndexedAudioSource {
   /// [uri].
   Uri get _effectiveUri => _overrideUri ?? uri;
 
-  Map<String, String>? get _mergedHeaders =>
-      headers == null && _userAgent == null
-          ? null
-          : {
-              if (headers != null)
-                for (var key in headers!.keys) key: headers![key]!,
-              if (_userAgent != null) 'User-Agent': _userAgent!,
-            };
+  Map<String, String>? get _mergedHeaders {
+    if (headers == null && _userAgent == null) {
+      return null;
+    }
+
+    Map<String, String>? merged = {};
+    if (headers != null) {
+      final computedHeaders = headers!();
+      merged.addAll(computedHeaders);
+    }
+
+    if (_userAgent != null) {
+      merged['User-Agent'] = _userAgent!;
+    }
+
+    return merged;
+  }
 
   @override
   Future<void> _setup(AudioPlayer player) async {
@@ -3307,7 +3316,8 @@ _ProxyHandler _proxyHandlerForUri(
       request.headers
           .forEach((name, value) => requestHeaders[name] = value.join(', '));
       // write supplied headers last (to ensure supplied headers aren't overwritten)
-      headers?.forEach((name, value) => requestHeaders[name] = value);
+      var computedHeaders = headers?.call();
+      computedHeaders?.forEach((name, value) => requestHeaders[name] = value);
       final originRequest =
           await _getUrl(client, redirectedUri ?? uri, headers: requestHeaders);
       host = originRequest.headers.value(HttpHeaders.hostHeader);
